@@ -6,6 +6,7 @@ const db = require('../providers/firebase');
 const handleError = require('../providers/handle-error');
 
 const Message = db.ref(`${process.env.FIREBASE_ACCESS_TOKEN}/messages`);
+const User= db.ref(`${process.env.FIREBASE_ACCESS_TOKEN}/users`);
 
 const app = express();
 
@@ -34,6 +35,40 @@ app.post('/:chatID', async (req, res) => {
     handleError(res, null, 'empty-message');
     return;
   }
+
+  const chatIdRaw = atob(req.params.chatID);
+  if( chatIdRaw.indexOf(req.session.userID) === -1){
+    handleError(res,null,'not allowed');
+  }
+
+  const participantes = chatIdRaw.split('(*-*)');
+  participantes.forEach(async (participant) =>{
+
+    const hasMessageFirebase = await User.child(participant).child('hasMessage').once('value');
+
+    let hasMessageFlag = 0;
+    hasMessageFirebase.forEach((chatIdObject) => {
+      if (chatIdObject.val().chatID === req.params.chatID) hasMessageFlag = 1;
+    });
+    if (hasMessageFlag) {
+      const user = await User
+        .child(participant)
+        .child('hasMessage')
+        .orderByChild('chatID')
+        .equalTo(req.params.chatID)
+        .once('value');
+
+      const [key, { count }] = Object.entries(user.val())[0];
+
+      User.child(participant).child('hasMessage').child(key).update({ count: count + 1 });
+      return;
+    }
+
+    User.child(participant).child('hasMessage').push({
+      chatID: req.params.chatID,
+      count: 1,
+    });
+  });
 
   await Message.child(req.params.chatID).push({
     sender: req.session.userID,
